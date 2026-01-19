@@ -1,0 +1,15 @@
+name = "website-tracker"
+main = "src/index.js"
+compatibility_date = "2025-12-01"
+
+# 绑定 D1 数据库（部署前需要在 Cloudflare 创建并填入 database_id）
+[[d1_databases]]
+binding = "DB"
+database_name = "website-tracker"
+database_id = "REPLACE_ME"
+
+[vars]
+# 允许的站点标识（简单白名单，可改成数组/多站点）
+ALLOWED_SITE = "tylerzhangyi.github.io"
+
+

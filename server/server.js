@@ -1,0 +1,467 @@
+const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const fs = require('fs');
+const cors = require('cors');
+const crypto = require('crypto');
+const UAParser = require('ua-parser-js');
+
+const app = express();
+const PORT = process.env.PORT || 5555;
+const ALLOWED_SITE = process.env.ALLOWED_SITE || 'tyler.yunguhs.com';
+
+// 数据库路径
+const dbPath = path.join(__dirname, 'tracker.db');
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('打开数据库失败:', err);
+    process.exit(1);
+  }
+  console.log('已连接到数据库:', dbPath);
+});
+
+// 将 sqlite3 的回调 API 包装为 Promise
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+}
+
+function dbAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+// 中间件 - CORS 配置（允许本地开发）
+app.use(cors({
+  origin: true, // 允许所有来源（本地开发）
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: '100kb' }));
+app.use(express.static(path.join(__dirname, '../dashboard')));
+
+// 请求日志中间件
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.url}`);
+  if (req.method === 'POST' && req.body) {
+    console.log('  Body:', JSON.stringify(req.body).slice(0, 200));
+  }
+  next();
+});
+
+// 简单的 IP hash（隐私友好）
+function hashIp(ip) {
+  if (!ip) return '';
+  // 简单 hash，只保留前 16 个字符
+  return crypto.createHash('sha256').update(ip).digest('hex').slice(0, 16);
+}
+
+// POST /collect - 接收追踪事件
+app.post('/collect', async (req, res) => {
+  try {
+    const body = req.body;
+    const ip = req.ip || req.connection?.remoteAddress || '';
+    const ua = req.get('user-agent') || '';
+    
+    console.log('📥 收到事件请求:', {
+      site: body.site,
+      type: body.type,
+      ts: body.ts,
+      ip: ip ? ip.substring(0, 20) + '...' : 'unknown',
+      origin: req.get('origin') || 'none'
+    });
+
+    // 简单验证
+    if (!body.site || !body.type || !body.ts) {
+      console.log('❌ 验证失败: 缺少必要字段');
+      return res.status(400).json({ ok: false, error: 'missing fields' });
+    }
+
+    // 可选：站点白名单检查
+    if (ALLOWED_SITE && body.site !== ALLOWED_SITE) {
+      return res.status(403).json({ ok: false, error: 'site not allowed' });
+    }
+
+    const id = `evt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const ipHash = hashIp(ip);
+
+    await dbRun(
+      `INSERT INTO events (id, site, ts, type, session_id, visitor_id, url, path, referrer, ua, ip_hash, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        body.site,
+        body.ts,
+        body.type,
+        body.session_id || null,
+        body.visitor_id || null,
+        body.url || null,
+        body.path || null,
+        body.referrer || null,
+        ua,
+        ipHash,
+        JSON.stringify(body.data || {}),
+      ]
+    );
+
+    console.log(`✅ 事件已保存: ${body.type} from ${body.site} at ${new Date(body.ts).toLocaleString()}`);
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('收集事件失败:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 解析 User-Agent 获取设备信息
+function parseDevice(ua) {
+  if (!ua) return { device: 'Unknown', os: 'Unknown', browser: 'Unknown' };
+  const parser = new UAParser(ua);
+  const device = parser.getDevice();
+  const os = parser.getOS();
+  const browser = parser.getBrowser();
+  
+  return {
+    device: device.model || device.type || 'Desktop',
+    deviceType: device.type || 'desktop',
+    os: `${os.name || 'Unknown'} ${os.version || ''}`.trim(),
+    browser: `${browser.name || 'Unknown'} ${browser.version || ''}`.trim(),
+  };
+}
+
+// 构建桑基图数据
+function buildSankeyData(pageviews) {
+  // 节点：来源、设备类型、页面
+  const nodes = new Map();
+  const links = [];
+  
+  // 统计来源 → 页面
+  const referrerToPage = new Map();
+  // 统计设备 → 页面
+  const deviceToPage = new Map();
+  
+  pageviews.forEach(pv => {
+    const referrer = pv.referrer || '直接访问';
+    const path = pv.path || '/';
+    const deviceInfo = parseDevice(pv.ua);
+    const deviceType = deviceInfo.deviceType || 'desktop';
+    
+    // 来源 → 页面
+    const refKey = `${referrer}→${path}`;
+    referrerToPage.set(refKey, (referrerToPage.get(refKey) || 0) + 1);
+    
+    // 设备 → 页面
+    const devKey = `${deviceType}→${path}`;
+    deviceToPage.set(devKey, (deviceToPage.get(devKey) || 0) + 1);
+  });
+  
+  // 构建节点列表
+  const nodeLabels = [];
+  const nodeMap = new Map();
+  let nodeIndex = 0;
+  
+  // 添加来源节点
+  const referrers = new Set();
+  const devices = new Set();
+  const pages = new Set();
+  
+  pageviews.forEach(pv => {
+    const referrer = pv.referrer || '直接访问';
+    const path = pv.path || '/';
+    const deviceInfo = parseDevice(pv.ua);
+    const deviceType = deviceInfo.deviceType || 'desktop';
+    
+    referrers.add(referrer);
+    devices.add(deviceType);
+    pages.add(path);
+  });
+  
+  // 添加节点：来源 → 设备 → 页面
+  referrers.forEach(ref => {
+    if (!nodeMap.has(ref)) {
+      nodeMap.set(ref, nodeIndex++);
+      nodeLabels.push(ref);
+    }
+  });
+  
+  devices.forEach(dev => {
+    if (!nodeMap.has(dev)) {
+      nodeMap.set(dev, nodeIndex++);
+      nodeLabels.push(dev);
+    }
+  });
+  
+  pages.forEach(page => {
+    if (!nodeMap.has(page)) {
+      nodeMap.set(page, nodeIndex++);
+      nodeLabels.push(page);
+    }
+  });
+  
+  // 构建连接：来源 → 设备 → 页面
+  const linkMap = new Map();
+  
+  pageviews.forEach(pv => {
+    const referrer = pv.referrer || '直接访问';
+    const path = pv.path || '/';
+    const deviceInfo = parseDevice(pv.ua);
+    const deviceType = deviceInfo.deviceType || 'desktop';
+    
+    // 来源 → 设备
+    const link1Key = `${referrer}→${deviceType}`;
+    linkMap.set(link1Key, (linkMap.get(link1Key) || 0) + 1);
+    
+    // 设备 → 页面
+    const link2Key = `${deviceType}→${path}`;
+    linkMap.set(link2Key, (linkMap.get(link2Key) || 0) + 1);
+  });
+  
+  // 构建 links 数组
+  linkMap.forEach((value, key) => {
+    const [source, target] = key.split('→');
+    if (nodeMap.has(source) && nodeMap.has(target)) {
+      links.push({
+        source: nodeMap.get(source),
+        target: nodeMap.get(target),
+        value: value
+      });
+    }
+  });
+  
+  return {
+    nodes: nodeLabels.map(label => ({ label })),
+    links: links
+  };
+}
+
+// GET /stats - 获取统计数据
+app.get('/stats', async (req, res) => {
+  try {
+    const site = req.query.site || ALLOWED_SITE;
+    const sinceMin = parseInt(req.query.sinceMin || '1440', 10);
+    const sinceTs = Date.now() - sinceMin * 60 * 1000;
+
+    // PV（pageview 数量）
+    const pvRow = await dbGet(
+      `SELECT COUNT(*) as count FROM events
+       WHERE site = ? AND type = 'pageview' AND ts >= ?`,
+      [site, sinceTs]
+    );
+    const pv = pvRow?.count || 0;
+
+    // UV（独立访客数，基于 visitor_id）
+    const uvRow = await dbGet(
+      `SELECT COUNT(DISTINCT visitor_id) as count FROM events
+       WHERE site = ? AND ts >= ? AND visitor_id IS NOT NULL`,
+      [site, sinceTs]
+    );
+    const uv = uvRow?.count || 0;
+
+    // PV 趋势数据（按小时分组）
+    const pvTrendRaw = await dbAll(
+      `SELECT 
+        strftime('%Y-%m-%d %H:00:00', ts/1000, 'unixepoch', 'localtime') as hour_key,
+        COUNT(*) as count
+       FROM events
+       WHERE site = ? AND type = 'pageview' AND ts >= ?
+       GROUP BY hour_key
+       ORDER BY hour_key ASC`,
+      [site, sinceTs]
+    );
+    
+    const pvTrend = (pvTrendRaw || []).map(row => ({
+      time: row.hour_key || '',
+      count: row.count || 0
+    }));
+
+    // Top Pages（按 path 分组统计 pageview，包含标题）
+    const topPagesRaw = await dbAll(
+      `SELECT path, data, COUNT(*) as pv FROM events
+       WHERE site = ? AND type = 'pageview' AND ts >= ? AND path IS NOT NULL
+       GROUP BY path
+       ORDER BY pv DESC
+       LIMIT 20`,
+      [site, sinceTs]
+    );
+    
+    // 解析每个页面的标题
+    const topPages = (topPagesRaw || []).map(row => {
+      let title = '';
+      try {
+        const data = JSON.parse(row.data || '{}');
+        title = data.title || '';
+      } catch (e) {}
+      return {
+        path: row.path,
+        title: title,
+        pv: row.pv
+      };
+    });
+
+    // 访客列表（visitor_id, 设备信息, 访问页面数, 首次/最后访问时间）
+    const visitorsRaw = await dbAll(
+      `SELECT 
+        visitor_id,
+        MIN(ts) as first_ts,
+        MAX(ts) as last_ts,
+        COUNT(DISTINCT path) as pages_count,
+        COUNT(CASE WHEN type = 'pageview' THEN 1 END) as pv_count,
+        MAX(ua) as ua
+       FROM events
+       WHERE site = ? AND ts >= ? AND visitor_id IS NOT NULL
+       GROUP BY visitor_id
+       ORDER BY last_ts DESC
+       LIMIT 50`,
+      [site, sinceTs]
+    );
+    
+    const visitors = (visitorsRaw || []).map(v => {
+      const deviceInfo = parseDevice(v.ua);
+      return {
+        visitor_id: v.visitor_id,
+        device: deviceInfo.device,
+        deviceType: deviceInfo.deviceType,
+        os: deviceInfo.os,
+        browser: deviceInfo.browser,
+        firstVisit: v.first_ts,
+        lastVisit: v.last_ts,
+        pagesCount: v.pages_count,
+        pvCount: v.pv_count || 0,
+      };
+    });
+
+    // 设备统计（设备类型、操作系统、浏览器分布）
+    const allPageviews = await dbAll(
+      `SELECT ua FROM events
+       WHERE site = ? AND type = 'pageview' AND ts >= ? AND ua IS NOT NULL`,
+      [site, sinceTs]
+    );
+    
+    const deviceStats = {
+      deviceTypes: {},
+      os: {},
+      browsers: {},
+    };
+    
+    allPageviews.forEach(row => {
+      const info = parseDevice(row.ua);
+      deviceStats.deviceTypes[info.deviceType] = (deviceStats.deviceTypes[info.deviceType] || 0) + 1;
+      deviceStats.os[info.os] = (deviceStats.os[info.os] || 0) + 1;
+      deviceStats.browsers[info.browser] = (deviceStats.browsers[info.browser] || 0) + 1;
+    });
+
+    // Recent Events（最近 50 条，包含标题）
+    const recentRaw = await dbAll(
+      `SELECT ts, type, path, data, visitor_id, ua FROM events
+       WHERE site = ? AND ts >= ?
+       ORDER BY ts DESC
+       LIMIT 50`,
+      [site, sinceTs]
+    );
+    
+    const recent = (recentRaw || []).map(ev => {
+      let dataObj = {};
+      let title = '';
+      try {
+        dataObj = JSON.parse(ev.data || '{}');
+        title = dataObj.title || '';
+      } catch (e) {}
+      
+      const deviceInfo = parseDevice(ev.ua);
+      
+      return {
+        ts: ev.ts,
+        type: ev.type,
+        path: ev.path,
+        title: title,
+        data: JSON.stringify(dataObj),
+        visitor_id: ev.visitor_id,
+        device: deviceInfo.device,
+        browser: deviceInfo.browser,
+      };
+    });
+
+    // 桑基图数据：来源 → 页面，设备 → 页面
+    const pageviewsForSankey = await dbAll(
+      `SELECT referrer, path, ua FROM events
+       WHERE site = ? AND type = 'pageview' AND ts >= ? AND path IS NOT NULL`,
+      [site, sinceTs]
+    );
+    
+    // 构建桑基图数据
+    const sankeyData = buildSankeyData(pageviewsForSankey);
+
+    res.json({
+      ok: true,
+      pv,
+      uv,
+      sinceMin,
+      topPages: topPages || [],
+      recent: recent || [],
+      visitors: visitors || [],
+      deviceStats: deviceStats,
+      pvTrend: pvTrend || [],
+      sankey: sankeyData,
+    });
+  } catch (err) {
+    console.error('获取统计失败:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /tracker.js - 动态下发追踪脚本
+app.get('/tracker.js', (req, res) => {
+  const trackerPath = path.join(__dirname, '../tracker/tracker.js');
+  const trackerCode = fs.readFileSync(trackerPath, 'utf8');
+
+  // 替换默认的 ENDPOINT
+  const defaultEndpoint = `${req.protocol}://${req.get('host')}/collect`;
+  const modifiedCode = trackerCode.replace(
+    /const ENDPOINT = .*?;/,
+    `const ENDPOINT = "${defaultEndpoint}";`
+  );
+
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(modifiedCode);
+});
+
+// 启动服务器
+app.listen(PORT, () => {
+  console.log(`\n🚀 网站追踪服务器已启动`);
+  console.log(`   访问地址: http://localhost:${PORT}`);
+  console.log(`   仪表盘: http://localhost:${PORT}/`);
+  console.log(`   追踪脚本: http://localhost:${PORT}/tracker.js`);
+  console.log(`   接收端点: http://localhost:${PORT}/collect`);
+  console.log(`   允许站点: ${ALLOWED_SITE}\n`);
+});
+
+// 优雅关闭
+process.on('SIGINT', () => {
+  console.log('\n正在关闭数据库连接...');
+  db.close((err) => {
+    if (err) {
+      console.error('关闭数据库失败:', err);
+    } else {
+      console.log('数据库已关闭');
+    }
+    process.exit(0);
+  });
+});

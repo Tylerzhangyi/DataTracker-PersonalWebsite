@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>访问追踪 - 仪表盘</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+      :root { color-scheme: light; }
+      body { font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial; margin: 0; background: #0b1220; color: #e7eefc; }
+      header { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03); position: sticky; top: 0; backdrop-filter: blur(8px); }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      input, select { background: rgba(255,255,255,.06); color: #e7eefc; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 10px 12px; outline: none; }
+      button { background: #4f7cff; color: white; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; }
+      button:disabled { opacity: .6; cursor: default; }
+      main { padding: 18px 24px 40px; max-width: 1200px; margin: 0 auto; }
+      .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+      .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 14px; }
+      .k { opacity: .75; font-size: 12px; }
+      .v { font-size: 26px; margin-top: 6px; font-weight: 650; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 10px 10px; border-bottom: 1px solid rgba(255,255,255,.08); vertical-align: top; }
+      th { text-align: left; font-size: 12px; opacity: .75; font-weight: 600; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(79,124,255,.18); border: 1px solid rgba(79,124,255,.35); }
+      @media (max-width: 900px) { .cards{grid-template-columns: repeat(2, minmax(0,1fr));} .grid{grid-template-columns: 1fr;} }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="row">
+        <div style="font-weight:700">访问追踪仪表盘</div>
+        <div style="opacity:.7">（轻量版 Analytics）</div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <input id="endpoint" style="min-width:360px" placeholder="服务器地址，例如 http://localhost:3000" />
+        <input id="site" style="min-width:220px" placeholder="site，例如 tylerzhangyi.github.io" />
+        <select id="since">
+          <option value="60">最近 1 小时</option>
+          <option value="360">最近 6 小时</option>
+          <option value="1440" selected>最近 24 小时</option>
+          <option value="10080">最近 7 天</option>
+          <option value="43200">最近 30 天</option>
+        </select>
+        <button id="refresh">刷新</button>
+        <div id="status" style="opacity:.7"></div>
+      </div>
+    </header>
+
+    <main>
+      <div class="cards">
+        <div class="card">
+          <div class="k">PV（pageview）</div>
+          <div class="v" id="pv">-</div>
+        </div>
+        <div class="card">
+          <div class="k">UV（匿名访客数）</div>
+          <div class="v" id="uv">-</div>
+        </div>
+        <div class="card">
+          <div class="k">时间窗口</div>
+          <div class="v" id="window">-</div>
+        </div>
+        <div class="card">
+          <div class="k">最近事件</div>
+          <div class="v" id="events">-</div>
+        </div>
+      </div>
+
+      <!-- PV 桑基能量分流图 -->
+      <div class="card" style="margin-top:14px">
+        <div style="font-weight:650">PV 能量分流图</div>
+        <div style="margin-top:10px; position:relative; height:500px">
+          <div id="sankeyChart"></div>
+        </div>
+      </div>
+
+      <!-- 设备分布饼图 -->
+      <div class="grid" style="margin-top:14px">
+        <div class="card">
+          <div style="font-weight:650">设备类型分布</div>
+          <div style="margin-top:10px; position:relative; height:250px">
+            <canvas id="deviceTypeChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div style="font-weight:650">操作系统分布</div>
+          <div style="margin-top:10px; position:relative; height:250px">
+            <canvas id="osChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div style="font-weight:650">浏览器分布</div>
+          <div style="margin-top:10px; position:relative; height:250px">
+            <canvas id="browserChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:14px">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:650">Top Pages</div>
+            <div class="k">按 PV 排序</div>
+          </div>
+          <div style="margin-top:10px; overflow:auto; max-height:420px">
+            <table>
+              <thead><tr><th>Path</th><th>Title</th><th>PV</th></tr></thead>
+              <tbody id="topPages"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:650">Visitors</div>
+            <div class="k">最近 50 位</div>
+          </div>
+          <div style="margin-top:10px; overflow:auto; max-height:420px">
+            <table>
+              <thead><tr><th>Device</th><th>OS</th><th>Browser</th><th>Pages</th><th>Last Visit</th></tr></thead>
+              <tbody id="visitors"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:12px">
+        <div class="card">
+          <div style="font-weight:650">Device Types</div>
+          <div style="margin-top:10px; overflow:auto; max-height:300px">
+            <table>
+              <thead><tr><th>Type</th><th>Count</th></tr></thead>
+              <tbody id="deviceTypes"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-weight:650">Operating Systems</div>
+          <div style="margin-top:10px; overflow:auto; max-height:300px">
+            <table>
+              <thead><tr><th>OS</th><th>Count</th></tr></thead>
+              <tbody id="osList"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-weight:650">Browsers</div>
+          <div style="margin-top:10px; overflow:auto; max-height:300px">
+            <table>
+              <thead><tr><th>Browser</th><th>Count</th></tr></thead>
+              <tbody id="browsers"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:650">Recent Events</div>
+          <div class="k">最多 50 条</div>
+        </div>
+        <div style="margin-top:10px; overflow:auto; max-height:420px">
+          <table>
+            <thead><tr><th>Time</th><th>Type</th><th>Path</th><th>Title</th><th>Device</th><th>Data</th></tr></thead>
+            <tbody id="recent"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const endpointEl = $('endpoint');
+      const siteEl = $('site');
+      const sinceEl = $('since');
+      const refreshBtn = $('refresh');
+      const statusEl = $('status');
+
+      const pvEl = $('pv');
+      const uvEl = $('uv');
+      const windowEl = $('window');
+      const eventsEl = $('events');
+      const topPagesEl = $('topPages');
+      const recentEl = $('recent');
+      const visitorsEl = $('visitors');
+      const deviceTypesEl = $('deviceTypes');
+      const osListEl = $('osList');
+      const browsersEl = $('browsers');
+
+      // 图表实例
+      let sankeyChart = null;
+      let deviceTypeChart = null;
+      let osChart = null;
+      let browserChart = null;
+
+      // Chart.js 默认配置
+      Chart.defaults.color = '#e7eefc';
+      Chart.defaults.borderColor = 'rgba(255,255,255,0.1)';
+      Chart.defaults.backgroundColor = 'rgba(79,124,255,0.3)';
+
+      function setStatus(s){ statusEl.textContent = s || ''; }
+      function fmtTime(ts){
+        const d = new Date(ts);
+        return d.toLocaleString();
+      }
+      function escapeHtml(s){
+        return (s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      }
+
+      function loadDefaults(){
+        endpointEl.value = localStorage.getItem('__wt_endpoint') || 'http://110.40.153.38:5555';
+        siteEl.value = localStorage.getItem('__wt_site') || 'tyler.yunguhs.com';
+      }
+
+      async function refresh(){
+        const endpoint = endpointEl.value.trim().replace(/\/+$/, '');
+        const site = siteEl.value.trim();
+        const sinceMin = sinceEl.value;
+        if(!endpoint || !site){
+          setStatus('请先填写 endpoint 和 site');
+          return;
+        }
+        localStorage.setItem('__wt_endpoint', endpoint);
+        localStorage.setItem('__wt_site', site);
+
+        refreshBtn.disabled = true;
+        setStatus('加载中…');
+        try{
+          const r = await fetch(`${endpoint}/stats?site=${encodeURIComponent(site)}&sinceMin=${encodeURIComponent(sinceMin)}`);
+          const j = await r.json();
+          if(!j.ok) throw new Error(j.error || 'unknown');
+
+          pvEl.textContent = j.pv;
+          uvEl.textContent = j.uv;
+          windowEl.textContent = `${j.sinceMin} min`;
+          eventsEl.textContent = (j.recent || []).length;
+
+          // Top Pages（包含标题）
+          topPagesEl.innerHTML = (j.topPages || []).map(row =>
+            `<tr>
+              <td class="mono">${escapeHtml(row.path || '(unknown)')}</td>
+              <td>${escapeHtml(row.title || '-')}</td>
+              <td>${row.pv}</td>
+            </tr>`
+          ).join('');
+
+          // Visitors（访客列表）
+          visitorsEl.innerHTML = (j.visitors || []).map(v => {
+            const lastVisit = v.lastVisit ? fmtTime(v.lastVisit) : '-';
+            return `<tr>
+              <td>${escapeHtml(v.device || 'Unknown')}</td>
+              <td class="mono" style="font-size:11px">${escapeHtml(v.os || '-')}</td>
+              <td class="mono" style="font-size:11px">${escapeHtml(v.browser || '-')}</td>
+              <td>${v.pagesCount || 0}</td>
+              <td class="mono" style="font-size:11px">${lastVisit}</td>
+            </tr>`;
+          }).join('');
+
+          // Device Types
+          const deviceTypes = j.deviceStats?.deviceTypes || {};
+          deviceTypesEl.innerHTML = Object.entries(deviceTypes)
+            .sort((a, b) => b[1] - a[1])
+            .map(([type, count]) =>
+              `<tr><td>${escapeHtml(type || 'Unknown')}</td><td>${count}</td></tr>`
+            ).join('') || '<tr><td colspan="2">No data</td></tr>';
+
+          // OS List
+          const osList = j.deviceStats?.os || {};
+          osListEl.innerHTML = Object.entries(osList)
+            .sort((a, b) => b[1] - a[1])
+            .map(([os, count]) =>
+              `<tr><td class="mono" style="font-size:11px">${escapeHtml(os || 'Unknown')}</td><td>${count}</td></tr>`
+            ).join('') || '<tr><td colspan="2">No data</td></tr>';
+
+          // Browsers
+          const browsers = j.deviceStats?.browsers || {};
+          browsersEl.innerHTML = Object.entries(browsers)
+            .sort((a, b) => b[1] - a[1])
+            .map(([browser, count]) =>
+              `<tr><td class="mono" style="font-size:11px">${escapeHtml(browser || 'Unknown')}</td><td>${count}</td></tr>`
+            ).join('') || '<tr><td colspan="2">No data</td></tr>';
+
+          // Recent Events（包含标题和设备信息）
+          recentEl.innerHTML = (j.recent || []).map(ev => {
+            let data = '';
+            try { data = JSON.stringify(JSON.parse(ev.data || '{}')); } catch(e){ data = ev.data || ''; }
+            data = (data || '').slice(0, 150);
+            return `<tr>
+              <td class="mono" style="font-size:11px">${escapeHtml(fmtTime(ev.ts))}</td>
+              <td><span class="badge">${escapeHtml(ev.type)}</span></td>
+              <td class="mono" style="font-size:11px">${escapeHtml(ev.path || '')}</td>
+              <td style="font-size:11px">${escapeHtml(ev.title || '-')}</td>
+              <td style="font-size:11px">${escapeHtml((ev.device || 'Unknown') + ' / ' + (ev.browser || 'Unknown'))}</td>
+              <td class="mono" style="font-size:11px">${escapeHtml(data)}</td>
+            </tr>`;
+          }).join('');
+
+          // 更新图表
+          updateCharts(j);
+
+          setStatus('完成');
+        }catch(e){
+          setStatus('失败：' + (e && e.message ? e.message : String(e)));
+        }finally{
+          refreshBtn.disabled = false;
+        }
+      }
+
+      // 更新图表函数
+      function updateCharts(data) {
+        // PV 桑基能量分流图
+        const sankeyDiv = document.getElementById('sankeyChart');
+        if (sankeyChart) {
+          Plotly.purge(sankeyDiv);
+        }
+        
+        const sankey = data.sankey || { nodes: [], links: [] };
+        
+        if (sankey.nodes.length > 0 && sankey.links.length > 0) {
+          const sankeyData = {
+            type: "sankey",
+            orientation: "h",
+            node: {
+              pad: 15,
+              thickness: 20,
+              line: {
+                color: "rgba(255,255,255,0.2)",
+                width: 0.5
+              },
+              label: sankey.nodes.map(n => n.label),
+              color: sankey.nodes.map((n, i) => {
+                // 根据节点类型设置颜色
+                const label = n.label.toLowerCase();
+                if (label.includes('直接') || label.includes('direct')) return 'rgba(79,124,255,0.8)';
+                if (label.includes('desktop') || label.includes('mobile') || label.includes('tablet')) return 'rgba(79,124,255,0.6)';
+                return 'rgba(79,124,255,0.4)';
+              })
+            },
+            link: {
+              source: sankey.links.map(l => l.source),
+              target: sankey.links.map(l => l.target),
+              value: sankey.links.map(l => l.value),
+              color: sankey.links.map(() => 'rgba(79,124,255,0.3)')
+            }
+          };
+          
+          const layout = {
+            title: {
+              text: '访问流量分流：来源 → 设备 → 页面',
+              font: { color: '#e7eefc', size: 14 }
+            },
+            font: { color: '#e7eefc', size: 12 },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            height: 500
+          };
+          
+          Plotly.newPlot('sankeyChart', [sankeyData], layout, { responsive: true });
+        } else {
+          sankeyDiv.innerHTML = '<div style="text-align:center;padding:50px;opacity:0.5">暂无数据</div>';
+        }
+
+        // 设备类型分布饼图
+        const deviceTypeCtx = document.getElementById('deviceTypeChart');
+        if (deviceTypeChart) deviceTypeChart.destroy();
+        const deviceTypes = data.deviceStats?.deviceTypes || {};
+        const deviceTypeEntries = Object.entries(deviceTypes).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        deviceTypeChart = new Chart(deviceTypeCtx, {
+          type: 'doughnut',
+          data: {
+            labels: deviceTypeEntries.map(([k]) => k || 'Unknown'),
+            datasets: [{
+              data: deviceTypeEntries.map(([, v]) => v),
+              backgroundColor: [
+                'rgba(79,124,255,0.8)',
+                'rgba(79,124,255,0.6)',
+                'rgba(79,124,255,0.4)',
+                'rgba(79,124,255,0.3)',
+                'rgba(79,124,255,0.2)',
+              ]
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+            }
+          }
+        });
+
+        // 操作系统分布饼图
+        const osCtx = document.getElementById('osChart');
+        if (osChart) osChart.destroy();
+        const osList = data.deviceStats?.os || {};
+        const osEntries = Object.entries(osList).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        osChart = new Chart(osCtx, {
+          type: 'doughnut',
+          data: {
+            labels: osEntries.map(([k]) => (k || 'Unknown').split(' ')[0]),
+            datasets: [{
+              data: osEntries.map(([, v]) => v),
+              backgroundColor: [
+                'rgba(79,124,255,0.8)',
+                'rgba(79,124,255,0.6)',
+                'rgba(79,124,255,0.4)',
+                'rgba(79,124,255,0.3)',
+                'rgba(79,124,255,0.2)',
+              ]
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+            }
+          }
+        });
+
+        // 浏览器分布饼图
+        const browserCtx = document.getElementById('browserChart');
+        if (browserChart) browserChart.destroy();
+        const browsers = data.deviceStats?.browsers || {};
+        const browserEntries = Object.entries(browsers).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        browserChart = new Chart(browserCtx, {
+          type: 'doughnut',
+          data: {
+            labels: browserEntries.map(([k]) => (k || 'Unknown').split(' ')[0]),
+            datasets: [{
+              data: browserEntries.map(([, v]) => v),
+              backgroundColor: [
+                'rgba(79,124,255,0.8)',
+                'rgba(79,124,255,0.6)',
+                'rgba(79,124,255,0.4)',
+                'rgba(79,124,255,0.3)',
+                'rgba(79,124,255,0.2)',
+              ]
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+            }
+          }
+        });
+      }
+
+      refreshBtn.addEventListener('click', refresh);
+      loadDefaults();
+      
+      // 页面加载后自动刷新一次
+      window.addEventListener('load', () => {
+        setTimeout(refresh, 500);
+      });
+    </script>
+  </body>
+</html>
+
+
