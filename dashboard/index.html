@@ -71,7 +71,22 @@
 
       <!-- PV 桑基能量分流图 -->
       <div class="card" style="margin-top:14px">
-        <div style="font-weight:650">PV 能量分流图</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-weight:650">PV 能量分流图</div>
+          <div class="row" style="gap:8px">
+            <select id="sankeyLayers" style="min-width:200px;font-size:12px">
+              <option value="referrer,deviceType,path">来源 → 设备 → 页面</option>
+              <option value="referrer,os,path">来源 → 系统 → 页面</option>
+              <option value="referrer,browser,path">来源 → 浏览器 → 页面</option>
+              <option value="referrer,deviceType,os,path">来源 → 设备 → 系统 → 页面</option>
+              <option value="referrer,deviceType,browser,path">来源 → 设备 → 浏览器 → 页面</option>
+              <option value="deviceType,path">设备 → 页面</option>
+              <option value="os,path">系统 → 页面</option>
+              <option value="browser,path">浏览器 → 页面</option>
+            </select>
+            <button id="updateSankey" style="padding:8px 12px;font-size:12px">更新</button>
+          </div>
+        </div>
         <div style="margin-top:10px; position:relative; height:500px">
           <div id="sankeyChart"></div>
         </div>
@@ -191,12 +206,17 @@
       const deviceTypesEl = $('deviceTypes');
       const osListEl = $('osList');
       const browsersEl = $('browsers');
+      const sankeyLayersEl = $('sankeyLayers');
+      const updateSankeyBtn = $('updateSankey');
 
       // 图表实例
       let sankeyChart = null;
       let deviceTypeChart = null;
       let osChart = null;
       let browserChart = null;
+      
+      // 当前桑基图层配置
+      let currentSankeyLayers = 'referrer,deviceType,path';
 
       // Chart.js 默认配置
       Chart.defaults.color = '#e7eefc';
@@ -215,23 +235,33 @@
       function loadDefaults(){
         endpointEl.value = localStorage.getItem('__wt_endpoint') || 'http://110.40.153.38:5555';
         siteEl.value = localStorage.getItem('__wt_site') || 'tyler.yunguhs.com';
+        currentSankeyLayers = localStorage.getItem('__wt_sankey_layers') || 'referrer,deviceType,path';
+        sankeyLayersEl.value = currentSankeyLayers;
       }
+      
+      // 更新桑基图层配置
+      updateSankeyBtn.addEventListener('click', () => {
+        currentSankeyLayers = sankeyLayersEl.value;
+        refresh();
+      });
 
       async function refresh(){
         const endpoint = endpointEl.value.trim().replace(/\/+$/, '');
         const site = siteEl.value.trim();
         const sinceMin = sinceEl.value;
+        const sankeyLayers = currentSankeyLayers;
         if(!endpoint || !site){
           setStatus('请先填写 endpoint 和 site');
           return;
         }
         localStorage.setItem('__wt_endpoint', endpoint);
         localStorage.setItem('__wt_site', site);
+        localStorage.setItem('__wt_sankey_layers', sankeyLayers);
 
         refreshBtn.disabled = true;
         setStatus('加载中…');
         try{
-          const r = await fetch(`${endpoint}/stats?site=${encodeURIComponent(site)}&sinceMin=${encodeURIComponent(sinceMin)}`);
+          const r = await fetch(`${endpoint}/stats?site=${encodeURIComponent(site)}&sinceMin=${encodeURIComponent(sinceMin)}&sankeyLayers=${encodeURIComponent(sankeyLayers)}`);
           const j = await r.json();
           if(!j.ok) throw new Error(j.error || 'unknown');
 
@@ -349,9 +379,19 @@
             }
           };
           
+          // 生成标题
+          const layerNames = {
+            referrer: '来源',
+            deviceType: '设备',
+            os: '系统',
+            browser: '浏览器',
+            path: '页面'
+          };
+          const titleLayers = (data.sankey?.layers || currentSankeyLayers.split(',')).map(l => layerNames[l] || l).join(' → ');
+          
           const layout = {
             title: {
-              text: '访问流量分流：来源 → 设备 → 页面',
+              text: `访问流量分流：${titleLayers}`,
               font: { color: '#e7eefc', size: 14 }
             },
             font: { color: '#e7eefc', size: 12 },

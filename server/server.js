@@ -147,94 +147,81 @@ function parseDevice(ua) {
   };
 }
 
-// 构建桑基图数据
-function buildSankeyData(pageviews) {
-  // 节点：来源、设备类型、页面
-  const nodes = new Map();
-  const links = [];
+// 构建桑基图数据（支持可配置的层）
+function buildSankeyData(pageviews, layers = ['referrer', 'deviceType', 'path']) {
+  // 支持的层类型
+  const layerTypes = {
+    referrer: (pv) => pv.referrer || '直接访问',
+    deviceType: (pv) => {
+      const deviceInfo = parseDevice(pv.ua);
+      return deviceInfo.deviceType || 'desktop';
+    },
+    os: (pv) => {
+      const deviceInfo = parseDevice(pv.ua);
+      return deviceInfo.os || 'Unknown';
+    },
+    browser: (pv) => {
+      const deviceInfo = parseDevice(pv.ua);
+      return deviceInfo.browser.split(' ')[0] || 'Unknown'; // 只取浏览器名称，不要版本号
+    },
+    path: (pv) => pv.path || '/',
+  };
   
-  // 统计来源 → 页面
-  const referrerToPage = new Map();
-  // 统计设备 → 页面
-  const deviceToPage = new Map();
+  // 验证层配置
+  const validLayers = layers.filter(layer => layerTypes.hasOwnProperty(layer));
+  if (validLayers.length === 0) {
+    validLayers.push('referrer', 'deviceType', 'path'); // 默认配置
+  }
   
-  pageviews.forEach(pv => {
-    const referrer = pv.referrer || '直接访问';
-    const path = pv.path || '/';
-    const deviceInfo = parseDevice(pv.ua);
-    const deviceType = deviceInfo.deviceType || 'desktop';
-    
-    // 来源 → 页面
-    const refKey = `${referrer}→${path}`;
-    referrerToPage.set(refKey, (referrerToPage.get(refKey) || 0) + 1);
-    
-    // 设备 → 页面
-    const devKey = `${deviceType}→${path}`;
-    deviceToPage.set(devKey, (deviceToPage.get(devKey) || 0) + 1);
+  // 收集所有节点
+  const nodeSets = {};
+  validLayers.forEach(layer => {
+    nodeSets[layer] = new Set();
   });
   
-  // 构建节点列表
+  // 统计每个层的节点
+  pageviews.forEach(pv => {
+    validLayers.forEach(layer => {
+      const value = layerTypes[layer](pv);
+      nodeSets[layer].add(value);
+    });
+  });
+  
+  // 构建节点映射
   const nodeLabels = [];
   const nodeMap = new Map();
+  const layerNodeRanges = {}; // 记录每层节点的索引范围
   let nodeIndex = 0;
   
-  // 添加来源节点
-  const referrers = new Set();
-  const devices = new Set();
-  const pages = new Set();
-  
-  pageviews.forEach(pv => {
-    const referrer = pv.referrer || '直接访问';
-    const path = pv.path || '/';
-    const deviceInfo = parseDevice(pv.ua);
-    const deviceType = deviceInfo.deviceType || 'desktop';
-    
-    referrers.add(referrer);
-    devices.add(deviceType);
-    pages.add(path);
+  validLayers.forEach((layer, layerIdx) => {
+    const startIdx = nodeIndex;
+    nodeSets[layer].forEach(value => {
+      if (!nodeMap.has(value)) {
+        nodeMap.set(value, nodeIndex);
+        nodeLabels.push(value);
+        nodeIndex++;
+      }
+    });
+    layerNodeRanges[layer] = { start: startIdx, end: nodeIndex };
   });
   
-  // 添加节点：来源 → 设备 → 页面
-  referrers.forEach(ref => {
-    if (!nodeMap.has(ref)) {
-      nodeMap.set(ref, nodeIndex++);
-      nodeLabels.push(ref);
-    }
-  });
-  
-  devices.forEach(dev => {
-    if (!nodeMap.has(dev)) {
-      nodeMap.set(dev, nodeIndex++);
-      nodeLabels.push(dev);
-    }
-  });
-  
-  pages.forEach(page => {
-    if (!nodeMap.has(page)) {
-      nodeMap.set(page, nodeIndex++);
-      nodeLabels.push(page);
-    }
-  });
-  
-  // 构建连接：来源 → 设备 → 页面
+  // 构建连接
   const linkMap = new Map();
   
   pageviews.forEach(pv => {
-    const referrer = pv.referrer || '直接访问';
-    const path = pv.path || '/';
-    const deviceInfo = parseDevice(pv.ua);
-    const deviceType = deviceInfo.deviceType || 'desktop';
+    const values = validLayers.map(layer => layerTypes[layer](pv));
     
-    // 来源 → 设备
-    const link1Key = `${referrer}→${deviceType}`;
-    linkMap.set(link1Key, (linkMap.get(link1Key) || 0) + 1);
-    
-    // 设备 → 页面
-    const link2Key = `${deviceType}→${path}`;
-    linkMap.set(link2Key, (linkMap.get(link2Key) || 0) + 1);
+    // 连接相邻的层
+    for (let i = 0; i < values.length - 1; i++) {
+      const source = values[i];
+      const target = values[i + 1];
+      const linkKey = `${source}→${target}`;
+      linkMap.set(linkKey, (linkMap.get(linkKey) || 0) + 1);
+    }
   });
   
   // 构建 links 数组
+  const links = [];
   linkMap.forEach((value, key) => {
     const [source, target] = key.split('→');
     if (nodeMap.has(source) && nodeMap.has(target)) {
@@ -248,7 +235,8 @@ function buildSankeyData(pageviews) {
   
   return {
     nodes: nodeLabels.map(label => ({ label })),
-    links: links
+    links: links,
+    layers: validLayers // 返回使用的层配置
   };
 }
 
@@ -406,8 +394,12 @@ app.get('/stats', async (req, res) => {
       [site, sinceTs]
     );
     
+    // 从查询参数获取层配置（默认：referrer,deviceType,path）
+    const layersParam = req.query.sankeyLayers || 'referrer,deviceType,path';
+    const layers = layersParam.split(',').map(l => l.trim()).filter(Boolean);
+    
     // 构建桑基图数据
-    const sankeyData = buildSankeyData(pageviewsForSankey);
+    const sankeyData = buildSankeyData(pageviewsForSankey, layers);
 
     res.json({
       ok: true,
