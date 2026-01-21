@@ -40,9 +40,9 @@
         <select id="since">
           <option value="60">最近 1 小时</option>
           <option value="360">最近 6 小时</option>
-          <option value="1440" selected>最近 24 小时</option>
+          <option value="1440">最近 24 小时</option>
           <option value="10080">最近 7 天</option>
-          <option value="43200">最近 30 天</option>
+          <option value="43200" selected>最近 30 天</option>
         </select>
         <button id="refresh">刷新</button>
         <div id="status" style="opacity:.7"></div>
@@ -72,14 +72,17 @@
       <!-- PV 桑基能量分流图 -->
       <div class="card" style="margin-top:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div style="font-weight:650">PV 能量分流图</div>
+          <div style="font-weight:650">PV分流图</div>
           <div class="row" style="gap:8px">
-            <select id="sankeyLayers" style="min-width:200px;font-size:12px">
+            <select id="sankeyLayers" style="min-width:250px;font-size:12px">
+              <option value="os,browser,referrer,deviceType,path" selected>系统/浏览器 → 来源 → 设备 → 页面</option>
+              <option value="browser,referrer,deviceType,path">浏览器 → 来源 → 设备 → 页面</option>
+              <option value="os,referrer,deviceType,path">系统 → 来源 → 设备 → 页面</option>
+              <option value="browser,deviceType,path">浏览器 → 设备 → 页面</option>
+              <option value="os,deviceType,path">系统 → 设备 → 页面</option>
               <option value="referrer,deviceType,path">来源 → 设备 → 页面</option>
               <option value="referrer,os,path">来源 → 系统 → 页面</option>
               <option value="referrer,browser,path">来源 → 浏览器 → 页面</option>
-              <option value="referrer,deviceType,os,path">来源 → 设备 → 系统 → 页面</option>
-              <option value="referrer,deviceType,browser,path">来源 → 设备 → 浏览器 → 页面</option>
               <option value="deviceType,path">设备 → 页面</option>
               <option value="os,path">系统 → 页面</option>
               <option value="browser,path">浏览器 → 页面</option>
@@ -215,8 +218,8 @@
       let osChart = null;
       let browserChart = null;
       
-      // 当前桑基图层配置
-      let currentSankeyLayers = 'referrer,deviceType,path';
+      // 当前桑基图层配置（默认：系统/浏览器 → 来源 → 设备 → 页面）
+      let currentSankeyLayers = 'os,browser,referrer,deviceType,path';
 
       // Chart.js 默认配置
       Chart.defaults.color = '#e7eefc';
@@ -235,8 +238,14 @@
       function loadDefaults(){
         endpointEl.value = localStorage.getItem('__wt_endpoint') || 'http://110.40.153.38:5555';
         siteEl.value = localStorage.getItem('__wt_site') || 'tyler.yunguhs.com';
-        currentSankeyLayers = localStorage.getItem('__wt_sankey_layers') || 'referrer,deviceType,path';
+        currentSankeyLayers = localStorage.getItem('__wt_sankey_layers') || 'os,browser,referrer,deviceType,path';
         sankeyLayersEl.value = currentSankeyLayers;
+        // 默认时间窗口设为30天
+        if (!localStorage.getItem('__wt_since')) {
+          sinceEl.value = '43200';
+        } else {
+          sinceEl.value = localStorage.getItem('__wt_since');
+        }
       }
       
       // 更新桑基图层配置
@@ -257,6 +266,7 @@
         localStorage.setItem('__wt_endpoint', endpoint);
         localStorage.setItem('__wt_site', site);
         localStorage.setItem('__wt_sankey_layers', sankeyLayers);
+        localStorage.setItem('__wt_since', sinceMin);
 
         refreshBtn.disabled = true;
         setStatus('加载中…');

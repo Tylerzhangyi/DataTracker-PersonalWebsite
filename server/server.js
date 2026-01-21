@@ -148,7 +148,7 @@ function parseDevice(ua) {
 }
 
 // 构建桑基图数据（支持可配置的层）
-function buildSankeyData(pageviews, layers = ['referrer', 'deviceType', 'path']) {
+function buildSankeyData(pageviews, layers = ['os', 'browser', 'referrer', 'deviceType', 'path']) {
   // 支持的层类型
   const layerTypes = {
     referrer: (pv) => pv.referrer || '直接访问',
@@ -170,7 +170,7 @@ function buildSankeyData(pageviews, layers = ['referrer', 'deviceType', 'path'])
   // 验证层配置
   const validLayers = layers.filter(layer => layerTypes.hasOwnProperty(layer));
   if (validLayers.length === 0) {
-    validLayers.push('referrer', 'deviceType', 'path'); // 默认配置
+    validLayers.push('os', 'browser', 'referrer', 'deviceType', 'path'); // 默认配置
   }
   
   // 收集所有节点
@@ -244,7 +244,7 @@ function buildSankeyData(pageviews, layers = ['referrer', 'deviceType', 'path'])
 app.get('/stats', async (req, res) => {
   try {
     const site = req.query.site || ALLOWED_SITE;
-    const sinceMin = parseInt(req.query.sinceMin || '1440', 10);
+    const sinceMin = parseInt(req.query.sinceMin || '43200', 10); // 默认30天
     const sinceTs = Date.now() - sinceMin * 60 * 1000;
 
     // PV（pageview 数量）
@@ -394,8 +394,8 @@ app.get('/stats', async (req, res) => {
       [site, sinceTs]
     );
     
-    // 从查询参数获取层配置（默认：referrer,deviceType,path）
-    const layersParam = req.query.sankeyLayers || 'referrer,deviceType,path';
+    // 从查询参数获取层配置（默认：os,browser,referrer,deviceType,path）
+    const layersParam = req.query.sankeyLayers || 'os,browser,referrer,deviceType,path';
     const layers = layersParam.split(',').map(l => l.trim()).filter(Boolean);
     
     // 构建桑基图数据
