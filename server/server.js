@@ -404,10 +404,26 @@ app.get('/stats', async (req, res) => {
     // 新老用户统计
     // 新用户：在时间窗口内首次访问的用户（first_ts >= sinceTs）
     // 老用户：在时间窗口内访问，但首次访问在时间窗口之前的用户（first_ts < sinceTs）
-    const newUserStats = await dbAll(
+    // 先获取所有访客的首次访问时间（不限制时间窗口，获取真正的首次访问时间）
+    const allVisitorFirstVisit = await dbAll(
       `SELECT 
         visitor_id,
-        MIN(ts) as first_ts,
+        MIN(ts) as first_ts
+       FROM events
+       WHERE site = ? AND visitor_id IS NOT NULL
+       GROUP BY visitor_id`,
+      [site]
+    );
+    
+    const visitorFirstVisitMap = new Map();
+    allVisitorFirstVisit.forEach(v => {
+      visitorFirstVisitMap.set(v.visitor_id, v.first_ts);
+    });
+    
+    // 获取时间窗口内的访客及其 PV 统计
+    const windowUserStats = await dbAll(
+      `SELECT 
+        visitor_id,
         COUNT(CASE WHEN type = 'pageview' THEN 1 END) as pv_count
        FROM events
        WHERE site = ? AND ts >= ? AND visitor_id IS NOT NULL
@@ -420,8 +436,9 @@ app.get('/stats', async (req, res) => {
     let newUserPV = 0;
     let returningUserPV = 0;
     
-    newUserStats.forEach(stat => {
-      if (stat.first_ts >= sinceTs) {
+    windowUserStats.forEach(stat => {
+      const firstTs = visitorFirstVisitMap.get(stat.visitor_id);
+      if (firstTs && firstTs >= sinceTs) {
         // 新用户：首次访问在时间窗口内
         newUsers++;
         newUserPV += (stat.pv_count || 0);
