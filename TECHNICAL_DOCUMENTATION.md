@@ -317,6 +317,14 @@ The server exposes three primary HTTP endpoints:
       {"source": 2, "target": 4, "value": 80}
     ],
     "layers": ["referrer", "deviceType", "path"]
+  },
+  "userStats": {
+    "newUsers": 150,
+    "returningUsers": 417,
+    "newUserPV": 320,
+    "returningUserPV": 914,
+    "totalUsers": 567,
+    "totalPV": 1234
   }
 }
 ```
@@ -357,12 +365,28 @@ GROUP BY visitor_id
 ORDER BY last_ts DESC LIMIT 50
 ```
 
-**e) Device Statistics**:
+**e) New vs Returning Users**:
+- **New Users**: Visitors whose first visit (`first_ts`) occurs within the selected time window
+- **Returning Users**: Visitors who accessed the site within the time window but had their first visit before the time window
+- Calculation logic:
+  ```sql
+  SELECT 
+    visitor_id,
+    MIN(ts) as first_ts,
+    COUNT(CASE WHEN type = 'pageview' THEN 1 END) as pv_count
+  FROM events
+  WHERE site = ? AND ts >= ? AND visitor_id IS NOT NULL
+  GROUP BY visitor_id
+  ```
+- Classification: `first_ts >= sinceTs` → New User, `first_ts < sinceTs` → Returning User
+- Metrics provided: User count, PV count, and percentage distribution for both categories
+
+**f) Device Statistics**:
 - Retrieves all pageview events with User-Agent
 - Parses each User-Agent using `parseDevice()` function
 - Aggregates counts by device type, OS, and browser
 
-**f) PV Trend**:
+**g) PV Trend**:
 ```sql
 SELECT 
   strftime('%Y-%m-%d %H:00:00', ts/1000, 'unixepoch', 'localtime') as hour_key,
@@ -372,7 +396,7 @@ WHERE site = ? AND type = 'pageview' AND ts >= ?
 GROUP BY hour_key ORDER BY hour_key ASC
 ```
 
-**g) Sankey Data**:
+**h) Sankey Data**:
 - Retrieves all pageview events with referrer, path, and User-Agent
 - Applies configurable layer extraction (referrer, deviceType, OS, browser, path)
 - Builds node and link arrays representing flow relationships
@@ -745,6 +769,13 @@ The system uses event delegation with capture-phase listeners to ensure comprehe
 - Limit: Recent 50 events
 - **Insight**: Real-time activity monitoring and debugging
 
+**e) New vs Returning Users Table**:
+- Columns: User Type, User Count, PV Count, Percentage Distribution
+- Categories: New Users, Returning Users, Total
+- **New Users**: Visitors whose first visit occurred within the selected time window
+- **Returning Users**: Visitors who accessed the site within the time window but had their first visit before the time window
+- **Insight**: Measures user acquisition vs. retention, indicates growth patterns and user loyalty
+
 ### B. Key Metrics Dashboard
 
 #### 1. PV (Pageviews)
@@ -768,6 +799,34 @@ The system uses event delegation with capture-phase listeners to ensure comprehe
 - Indicates unique visitor count (anonymous identification)
 - PV/UV ratio indicates average pages per visitor (engagement metric)
 - Higher UV suggests broader audience reach
+
+#### 2.5. New vs Returning Users
+
+**Definition**: Classification of visitors based on whether their first visit occurred within the selected time window
+
+**New Users**:
+- **Definition**: Visitors whose first visit (`first_ts`) is within the selected time window
+- **Calculation**: Count of `visitor_id` where `MIN(ts) >= sinceTs`
+- **Interpretation**: Measures user acquisition, indicates growth and marketing effectiveness
+- **Business Value**: Higher new user percentage suggests successful acquisition campaigns
+
+**Returning Users**:
+- **Definition**: Visitors who accessed the site within the time window but had their first visit before the time window
+- **Calculation**: Count of `visitor_id` where `MIN(ts) < sinceTs` but `MAX(ts) >= sinceTs`
+- **Interpretation**: Measures user retention and loyalty
+- **Business Value**: Higher returning user percentage indicates strong user engagement and content quality
+
+**Metrics Provided**:
+- User count for each category
+- PV count for each category
+- Percentage distribution (both by user count and PV count)
+- Total aggregated values
+
+**Interpretation Guidelines**:
+- **High New User Ratio**: Indicates successful marketing or viral growth
+- **High Returning User Ratio**: Indicates strong retention and user loyalty
+- **Balanced Distribution**: Suggests healthy growth with good retention
+- **PV Distribution**: Shows engagement patterns (returning users typically have higher PV per user)
 
 #### 3. Time Window
 
@@ -1007,6 +1066,15 @@ CREATE INDEX IF NOT EXISTS idx_events_site_session_ts ON events(site, session_id
 | `/collect` | POST | Receive tracking events | JSON body |
 | `/stats` | GET | Retrieve aggregated statistics | `site`, `sinceMin`, `sankeyLayers` |
 | `/tracker.js` | GET | Serve tracking script | None |
+
+**Response Fields for `/stats`**:
+- `userStats`: Object containing new vs returning user statistics
+  - `newUsers`: Count of new users (first visit in time window)
+  - `returningUsers`: Count of returning users (first visit before time window)
+  - `newUserPV`: Total pageviews from new users
+  - `returningUserPV`: Total pageviews from returning users
+  - `totalUsers`: Sum of new and returning users
+  - `totalPV`: Sum of new and returning user pageviews
 
 ### Appendix C: Event Type Reference
 

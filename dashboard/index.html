@@ -178,6 +178,16 @@
       </div>
 
       <div class="card" style="margin-top:12px">
+        <div style="font-weight:650">新老用户统计</div>
+        <div style="margin-top:10px; overflow:auto">
+          <table>
+            <thead><tr><th>用户类型</th><th>用户数</th><th>PV</th><th>占比</th></tr></thead>
+            <tbody id="userStats"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="font-weight:650">Recent Events</div>
           <div class="k">最多 50 条</div>
@@ -209,6 +219,7 @@
       const deviceTypesEl = $('deviceTypes');
       const osListEl = $('osList');
       const browsersEl = $('browsers');
+      const userStatsEl = $('userStats');
       const sankeyLayersEl = $('sankeyLayers');
       const updateSankeyBtn = $('updateSankey');
 
@@ -324,6 +335,41 @@
             .map(([browser, count]) =>
               `<tr><td class="mono" style="font-size:11px">${escapeHtml(browser || 'Unknown')}</td><td>${count}</td></tr>`
             ).join('') || '<tr><td colspan="2">No data</td></tr>';
+
+          // 新老用户统计
+          const userStats = j.userStats || {};
+          const totalUsers = userStats.totalUsers || 0;
+          const totalPV = userStats.totalPV || 0;
+          const newUsers = userStats.newUsers || 0;
+          const returningUsers = userStats.returningUsers || 0;
+          const newUserPV = userStats.newUserPV || 0;
+          const returningUserPV = userStats.returningUserPV || 0;
+          
+          const newUserPercent = totalUsers > 0 ? ((newUsers / totalUsers) * 100).toFixed(1) : '0.0';
+          const returningUserPercent = totalUsers > 0 ? ((returningUsers / totalUsers) * 100).toFixed(1) : '0.0';
+          const newUserPVPercent = totalPV > 0 ? ((newUserPV / totalPV) * 100).toFixed(1) : '0.0';
+          const returningUserPVPercent = totalPV > 0 ? ((returningUserPV / totalPV) * 100).toFixed(1) : '0.0';
+          
+          userStatsEl.innerHTML = `
+            <tr>
+              <td><strong>新用户</strong></td>
+              <td>${newUsers}</td>
+              <td>${newUserPV}</td>
+              <td>${newUserPercent}% (用户) / ${newUserPVPercent}% (PV)</td>
+            </tr>
+            <tr>
+              <td><strong>老用户</strong></td>
+              <td>${returningUsers}</td>
+              <td>${returningUserPV}</td>
+              <td>${returningUserPercent}% (用户) / ${returningUserPVPercent}% (PV)</td>
+            </tr>
+            <tr style="border-top: 2px solid rgba(255,255,255,0.15)">
+              <td><strong>总计</strong></td>
+              <td><strong>${totalUsers}</strong></td>
+              <td><strong>${totalPV}</strong></td>
+              <td>100%</td>
+            </tr>
+          ` || '<tr><td colspan="4">No data</td></tr>';
 
           // Recent Events（包含标题和设备信息）
           recentEl.innerHTML = (j.recent || []).map(ev => {

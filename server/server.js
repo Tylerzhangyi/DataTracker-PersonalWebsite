@@ -401,6 +401,46 @@ app.get('/stats', async (req, res) => {
     // 构建桑基图数据
     const sankeyData = buildSankeyData(pageviewsForSankey, layers);
 
+    // 新老用户统计
+    // 新用户：在时间窗口内首次访问的用户（first_ts >= sinceTs）
+    // 老用户：在时间窗口内访问，但首次访问在时间窗口之前的用户（first_ts < sinceTs）
+    const newUserStats = await dbAll(
+      `SELECT 
+        visitor_id,
+        MIN(ts) as first_ts,
+        COUNT(CASE WHEN type = 'pageview' THEN 1 END) as pv_count
+       FROM events
+       WHERE site = ? AND ts >= ? AND visitor_id IS NOT NULL
+       GROUP BY visitor_id`,
+      [site, sinceTs]
+    );
+    
+    let newUsers = 0;
+    let returningUsers = 0;
+    let newUserPV = 0;
+    let returningUserPV = 0;
+    
+    newUserStats.forEach(stat => {
+      if (stat.first_ts >= sinceTs) {
+        // 新用户：首次访问在时间窗口内
+        newUsers++;
+        newUserPV += (stat.pv_count || 0);
+      } else {
+        // 老用户：首次访问在时间窗口之前
+        returningUsers++;
+        returningUserPV += (stat.pv_count || 0);
+      }
+    });
+    
+    const userStats = {
+      newUsers: newUsers,
+      returningUsers: returningUsers,
+      newUserPV: newUserPV,
+      returningUserPV: returningUserPV,
+      totalUsers: newUsers + returningUsers,
+      totalPV: newUserPV + returningUserPV
+    };
+
     res.json({
       ok: true,
       pv,
@@ -412,6 +452,7 @@ app.get('/stats', async (req, res) => {
       deviceStats: deviceStats,
       pvTrend: pvTrend || [],
       sankey: sankeyData,
+      userStats: userStats,
     });
   } catch (err) {
     console.error('获取统计失败:', err);
