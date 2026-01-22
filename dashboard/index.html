@@ -179,7 +179,27 @@
 
       <div class="card" style="margin-top:12px">
         <div style="font-weight:650">新老用户统计</div>
-        <div style="margin-top:10px; overflow:auto">
+        <div class="grid" style="margin-top:10px; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <div style="font-weight:600; margin-bottom:10px; opacity:0.9">用户分布</div>
+            <div style="position:relative; height:250px">
+              <canvas id="userTypeChart"></canvas>
+            </div>
+          </div>
+          <div>
+            <div style="font-weight:600; margin-bottom:10px; opacity:0.9">PV 分布</div>
+            <div style="position:relative; height:250px">
+              <canvas id="userPVChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="font-weight:600; margin-bottom:10px; opacity:0.9">新老用户时间趋势</div>
+          <div style="position:relative; height:300px">
+            <canvas id="userTrendChart"></canvas>
+          </div>
+        </div>
+        <div style="margin-top:14px; overflow:auto">
           <table>
             <thead><tr><th>用户类型</th><th>用户数</th><th>PV</th><th>占比</th></tr></thead>
             <tbody id="userStats"></tbody>
@@ -228,6 +248,9 @@
       let deviceTypeChart = null;
       let osChart = null;
       let browserChart = null;
+      let userTypeChart = null;
+      let userPVChart = null;
+      let userTrendChart = null;
       
       // 当前桑基图层配置（默认：系统/浏览器 → 来源 → 设备 → 页面）
       let currentSankeyLayers = 'os,browser,referrer,deviceType,path';
@@ -547,6 +570,204 @@
             }
           }
         });
+
+        // 新老用户分布饼图（按用户数）
+        const userTypeCtx = document.getElementById('userTypeChart');
+        if (userTypeChart) userTypeChart.destroy();
+        const userStats = data.userStats || {};
+        const newUsers = userStats.newUsers || 0;
+        const returningUsers = userStats.returningUsers || 0;
+        if (newUsers > 0 || returningUsers > 0) {
+          userTypeChart = new Chart(userTypeCtx, {
+            type: 'doughnut',
+            data: {
+              labels: ['新用户', '老用户'],
+              datasets: [{
+                data: [newUsers, returningUsers],
+                backgroundColor: [
+                  'rgba(79,124,255,0.8)',  // 新用户 - 蓝色
+                  'rgba(79,124,255,0.5)',  // 老用户 - 浅蓝色
+                ]
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const label = context.label || '';
+                      const value = context.parsed || 0;
+                      const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                      const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+                      return `${label}: ${value} (${percentage}%)`;
+                    }
+                  }
+                }
+              }
+            }
+          });
+        } else {
+          const ctx = userTypeCtx.getContext('2d');
+          ctx.clearRect(0, 0, userTypeCtx.width, userTypeCtx.height);
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('暂无数据', userTypeCtx.width / 2, userTypeCtx.height / 2);
+        }
+
+        // 新老用户 PV 分布饼图
+        const userPVCtx = document.getElementById('userPVChart');
+        if (userPVChart) userPVChart.destroy();
+        const newUserPV = userStats.newUserPV || 0;
+        const returningUserPV = userStats.returningUserPV || 0;
+        if (newUserPV > 0 || returningUserPV > 0) {
+          userPVChart = new Chart(userPVCtx, {
+            type: 'doughnut',
+            data: {
+              labels: ['新用户 PV', '老用户 PV'],
+              datasets: [{
+                data: [newUserPV, returningUserPV],
+                backgroundColor: [
+                  'rgba(79,124,255,0.8)',  // 新用户 PV - 蓝色
+                  'rgba(79,124,255,0.5)',  // 老用户 PV - 浅蓝色
+                ]
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      const label = context.label || '';
+                      const value = context.parsed || 0;
+                      const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                      const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+                      return `${label}: ${value} (${percentage}%)`;
+                    }
+                  }
+                }
+              }
+            }
+          });
+        } else {
+          const ctx = userPVCtx.getContext('2d');
+          ctx.clearRect(0, 0, userPVCtx.width, userPVCtx.height);
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('暂无数据', userPVCtx.width / 2, userPVCtx.height / 2);
+        }
+
+        // 新老用户时间趋势折线图
+        const userTrendCtx = document.getElementById('userTrendChart');
+        if (userTrendChart) userTrendChart.destroy();
+        const userTrend = data.userTrend || [];
+        if (userTrend.length > 0) {
+          // 格式化时间标签（只显示日期和小时）
+          const labels = userTrend.map(item => {
+            const date = new Date(item.time);
+            return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit' });
+          });
+          
+          userTrendChart = new Chart(userTrendCtx, {
+            type: 'line',
+            data: {
+              labels: labels,
+              datasets: [
+                {
+                  label: '新用户',
+                  data: userTrend.map(item => item.newUsers),
+                  borderColor: 'rgba(79,124,255,0.8)',
+                  backgroundColor: 'rgba(79,124,255,0.1)',
+                  fill: true,
+                  tension: 0.4,
+                  pointRadius: 2,
+                  pointHoverRadius: 4
+                },
+                {
+                  label: '老用户',
+                  data: userTrend.map(item => item.returningUsers),
+                  borderColor: 'rgba(79,124,255,0.5)',
+                  backgroundColor: 'rgba(79,124,255,0.05)',
+                  fill: true,
+                  tension: 0.4,
+                  pointRadius: 2,
+                  pointHoverRadius: 4
+                },
+                {
+                  label: '总用户',
+                  data: userTrend.map(item => item.totalUsers),
+                  borderColor: 'rgba(255,255,255,0.6)',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  fill: false,
+                  tension: 0.4,
+                  pointRadius: 1,
+                  pointHoverRadius: 3,
+                  borderDash: [5, 5]
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: 'index',
+                intersect: false
+              },
+              plugins: {
+                legend: { 
+                  position: 'top', 
+                  labels: { 
+                    boxWidth: 12, 
+                    font: { size: 11 },
+                    usePointStyle: true
+                  } 
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function(context) {
+                      return `${context.dataset.label}: ${context.parsed.y}`;
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  ticks: {
+                    maxRotation: 45,
+                    minRotation: 45,
+                    font: { size: 10 }
+                  },
+                  grid: {
+                    color: 'rgba(255,255,255,0.05)'
+                  }
+                },
+                y: {
+                  beginAtZero: true,
+                  ticks: {
+                    font: { size: 10 }
+                  },
+                  grid: {
+                    color: 'rgba(255,255,255,0.05)'
+                  }
+                }
+              }
+            }
+          });
+        } else {
+          const ctx = userTrendCtx.getContext('2d');
+          ctx.clearRect(0, 0, userTrendCtx.width, userTrendCtx.height);
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('暂无数据', userTrendCtx.width / 2, userTrendCtx.height / 2);
+        }
       }
 
       refreshBtn.addEventListener('click', refresh);

@@ -441,6 +441,61 @@ app.get('/stats', async (req, res) => {
       totalPV: newUserPV + returningUserPV
     };
 
+    // 新老用户时间趋势数据（按小时分组）
+    // 先获取所有访客的首次访问时间
+    const visitorFirstVisit = await dbAll(
+      `SELECT 
+        visitor_id,
+        MIN(ts) as first_ts
+       FROM events
+       WHERE site = ? AND visitor_id IS NOT NULL
+       GROUP BY visitor_id`,
+      [site]
+    );
+    
+    const firstVisitMap = new Map();
+    visitorFirstVisit.forEach(v => {
+      firstVisitMap.set(v.visitor_id, v.first_ts);
+    });
+
+    // 按小时统计新老用户（去重每个小时的访客）
+    const hourUserMap = new Map();
+    const allEvents = await dbAll(
+      `SELECT DISTINCT
+        strftime('%Y-%m-%d %H:00:00', ts/1000, 'unixepoch', 'localtime') as hour_key,
+        visitor_id
+       FROM events
+       WHERE site = ? AND ts >= ? AND visitor_id IS NOT NULL
+       ORDER BY hour_key ASC`,
+      [site, sinceTs]
+    );
+
+    allEvents.forEach(row => {
+      const hour = row.hour_key;
+      const vid = row.visitor_id;
+      
+      if (!hourUserMap.has(hour)) {
+        hourUserMap.set(hour, { newUsers: new Set(), returningUsers: new Set() });
+      }
+      
+      const firstTs = firstVisitMap.get(vid);
+      if (firstTs && firstTs >= sinceTs) {
+        hourUserMap.get(hour).newUsers.add(vid);
+      } else if (firstTs) {
+        hourUserMap.get(hour).returningUsers.add(vid);
+      }
+    });
+
+    // 转换为数组格式
+    const userTrend = Array.from(hourUserMap.entries())
+      .map(([time, data]) => ({
+        time: time,
+        newUsers: data.newUsers.size,
+        returningUsers: data.returningUsers.size,
+        totalUsers: data.newUsers.size + data.returningUsers.size
+      }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+
     res.json({
       ok: true,
       pv,
@@ -453,6 +508,7 @@ app.get('/stats', async (req, res) => {
       pvTrend: pvTrend || [],
       sankey: sankeyData,
       userStats: userStats,
+      userTrend: userTrend || [],
     });
   } catch (err) {
     console.error('获取统计失败:', err);

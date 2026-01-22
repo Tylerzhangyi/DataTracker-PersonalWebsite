@@ -402,6 +402,17 @@ GROUP BY hour_key ORDER BY hour_key ASC
 - Builds node and link arrays representing flow relationships
 - Counts occurrences of each flow path
 
+**i) User Trend (New vs Returning Users Over Time)**:
+- Aggregates new and returning users by hour within the selected time window
+- Calculation process:
+  1. Retrieves all visitor first visit timestamps
+  2. Groups events by hour and visitor_id
+  3. Classifies each visitor as new (first_ts >= sinceTs) or returning (first_ts < sinceTs)
+  4. Counts distinct visitors per hour for each category
+- Returns array of objects with `time`, `newUsers`, `returningUsers`, and `totalUsers` fields
+- Time format: `YYYY-MM-DD HH:00:00` (hourly granularity)
+- Purpose: Enables temporal analysis of user acquisition and retention patterns
+
 #### 3. GET /tracker.js
 
 **Purpose**: Dynamically serves the tracking script with auto-configured endpoint
@@ -732,6 +743,30 @@ The system uses event delegation with capture-phase listeners to ensure comprehe
 - Interpretation: Browser market share within user base
 - Business Value: Ensures compatibility testing coverage
 
+**d) New vs Returning Users Distribution**:
+- **User Count Chart**: Shows proportion of new users vs. returning users by visitor count
+- **PV Count Chart**: Shows proportion of pageviews from new users vs. returning users
+- Categories: New Users, Returning Users
+- Interpretation: User acquisition vs. retention patterns
+- Business Value: Measures marketing effectiveness (new users) and content quality/engagement (returning users)
+- Visual Design: Two side-by-side charts with distinct color coding for quick comparison
+
+**e) New vs Returning Users Time Trend**:
+- **Chart Type**: Multi-line chart (line chart with three datasets)
+- **Data Points**: Hourly aggregation of new users, returning users, and total users
+- **Lines**: 
+  - New Users (solid blue line with filled area)
+  - Returning Users (lighter blue line with filled area)
+  - Total Users (dashed white line, unfilled)
+- **Time Format**: Displays date and hour (e.g., "1月 15 14:00")
+- **Visual Design**: Smooth curves with tension, interactive tooltips, responsive scaling
+- **Interpretation**: Shows temporal patterns in user acquisition and retention
+- **Business Value**: 
+  - Identifies peak times for new user acquisition
+  - Reveals retention patterns over time
+  - Enables correlation with marketing campaigns or content releases
+  - Helps identify growth trends and seasonal patterns
+
 **Visual Design**:
 - Blue gradient color scheme (rgba(79,124,255,0.2-0.8))
 - Responsive sizing with `maintainAspectRatio: false`
@@ -775,6 +810,20 @@ The system uses event delegation with capture-phase listeners to ensure comprehe
 - **New Users**: Visitors whose first visit occurred within the selected time window
 - **Returning Users**: Visitors who accessed the site within the time window but had their first visit before the time window
 - **Insight**: Measures user acquisition vs. retention, indicates growth patterns and user loyalty
+
+**f) New vs Returning Users Visualization**:
+- **User Distribution Chart**: Doughnut chart showing the proportion of new users vs. returning users by user count
+- **PV Distribution Chart**: Doughnut chart showing the proportion of pageviews from new users vs. returning users
+- **Time Trend Chart**: Multi-line chart showing hourly trends of new users, returning users, and total users over time
+- **Visual Design**: 
+  - Doughnut charts: Blue gradient color scheme (darker blue `rgba(79,124,255,0.8)` for new users, lighter blue `rgba(79,124,255,0.5)` for returning users)
+  - Time trend: Three lines with filled areas (new users: solid blue, returning users: lighter blue, total: dashed white)
+- **Interactive Features**: Tooltips display exact counts and percentages on hover
+- **Layout**: Two side-by-side doughnut charts, followed by time trend chart, then detailed statistics table
+- **Chart Library**: Chart.js 4.4.0 (doughnut and line chart types)
+- **Insight**: 
+  - Doughnut charts: Quick visual comparison of user acquisition vs. retention patterns
+  - Time trend: Enables identification of growth trends, peak acquisition times, and correlation with marketing activities
 
 ### B. Key Metrics Dashboard
 
@@ -1075,6 +1124,10 @@ CREATE INDEX IF NOT EXISTS idx_events_site_session_ts ON events(site, session_id
   - `returningUserPV`: Total pageviews from returning users
   - `totalUsers`: Sum of new and returning users
   - `totalPV`: Sum of new and returning user pageviews
+- `userTrend`: Array of objects containing hourly new vs returning user trends
+  - Each object contains: `time` (hour timestamp), `newUsers` (count), `returningUsers` (count), `totalUsers` (sum)
+  - Time format: `YYYY-MM-DD HH:00:00`
+  - Sorted chronologically (ascending)
 
 ### Appendix C: Event Type Reference
 
